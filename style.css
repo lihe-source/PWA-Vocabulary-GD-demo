@@ -820,26 +820,24 @@ html, body {
   background: var(--border);
   margin: 0 8px;
 }
-.btn-stats-export {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 13px;
-  background: var(--bg);
-  color: var(--primary);
-  border: 2px solid var(--primary);
-  border-radius: var(--radius-sm);
-  font-family: 'Nunito', sans-serif;
-  font-size: 14px;
-  font-weight: 800;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+
+/* V5.7: stats page keeps summary only; CSV export lives in Settings. */
+.stats-summary-card {
+  margin: 12px 12px 0;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
 }
-.btn-stats-export:active {
-  background: var(--primary);
-  color: white;
+.stats-summary-card .stats-export-summary {
+  margin-bottom: 8px;
+}
+.stats-export-note {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
 }
 
 /* Settings stats hint */
@@ -2155,7 +2153,7 @@ a.err-back-link {
 
 
 
-/* V5.6: iOS PWA horizontal overflow guard */
+/* V5.7: iOS PWA horizontal overflow guard */
 #view-container, .settings-card, .card, .home-menu-grid, .essay-fb-card, .aiask-answer-box, .sentence-log-scroll {
   max-width: 100%;
 }

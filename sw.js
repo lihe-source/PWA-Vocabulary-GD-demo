@@ -1,4 +1,4 @@
-const CACHE_NAME = 'Voc-PWA-V5_6';
+const CACHE_NAME = 'Voc-PWA-V5_7';
 const ASSETS = [
   './',
   './index.html',

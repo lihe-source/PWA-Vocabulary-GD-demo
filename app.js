@@ -1,11 +1,11 @@
 // ===========================
-// 英文單字複習 PWA - app.js V5_6
+// 英文單字複習 PWA - app.js V5_7
 // 更新：修正版本顯示、清除資料、Service Worker 相容性、CSV 匯入與 AI 輸出安全
 // ===========================
 
-const APP_VERSION = 'V5_6';
-const APP_DISPLAY_VERSION = 'V5.6';
-const APP_CACHE_VERSION = 'Voc-PWA-V5_6';
+const APP_VERSION = 'V5_7';
+const APP_DISPLAY_VERSION = 'V5.7';
+const APP_CACHE_VERSION = 'Voc-PWA-V5_7';
 
 // Register Service Worker only when supported (prevents errors in unsupported browsers / webviews).
 if ('serviceWorker' in navigator) {
@@ -785,17 +785,15 @@ const DB = {
 const Gemini = {
   // All selectable models (display name -> API id)
   AVAILABLE_MODELS: [
-    // Text-generation models available in Gemini API / AI Studio around 2026/06/06.
-    // Keep stable low-latency models first; preview models are kept as optional fallbacks.
-    { label: 'Gemini 3.5 Flash',                 id: 'gemini-3.5-flash',                 tag: '推薦' },
-    { label: 'Gemini 3 Flash Preview',           id: 'gemini-3-flash-preview',           tag: 'Preview' },
-    { label: 'Gemini 3.1 Pro Preview',           id: 'gemini-3.1-pro-preview',           tag: '高階' },
-    { label: 'Gemini 3.1 Flash-Lite Preview',    id: 'gemini-3.1-flash-lite-preview',    tag: '快速' },
-    { label: 'Gemini Flash Latest',              id: 'gemini-flash-latest'               },
-    { label: 'Gemini Pro Latest',                id: 'gemini-pro-latest'                 },
-    { label: 'Gemini 2.5 Flash',                 id: 'gemini-2.5-flash'                  },
-    { label: 'Gemini 2.5 Flash-Lite',            id: 'gemini-2.5-flash-lite'             },
-    { label: 'Gemini 2.5 Pro',                   id: 'gemini-2.5-pro'                    },
+    // Text-generation models available in Gemini API / AI Studio as of 2026/06.
+    // Removed retired preview/latest aliases; keep stable low-latency models first.
+    { label: 'Gemini 3.5 Flash',              id: 'gemini-3.5-flash',              tag: '推薦' },
+    { label: 'Gemini 3.1 Flash-Lite',         id: 'gemini-3.1-flash-lite',         tag: '快速' },
+    { label: 'Gemini 3 Flash Preview',        id: 'gemini-3-flash-preview',        tag: 'Preview' },
+    { label: 'Gemini 3.1 Pro Preview',        id: 'gemini-3.1-pro-preview',        tag: '高階' },
+    { label: 'Gemini 2.5 Flash',              id: 'gemini-2.5-flash',              tag: '備援' },
+    { label: 'Gemini 2.5 Flash-Lite',         id: 'gemini-2.5-flash-lite',         tag: '備援' },
+    { label: 'Gemini 2.5 Pro',                id: 'gemini-2.5-pro',                tag: '備援' },
   ],
 
   // Returns model list with user-selected model first, then the rest as fallback
@@ -1737,6 +1735,38 @@ Views.home = {
   }
 };
 
+
+// ===========================
+// PRACTICE MODE SELECTOR — shared by quiz / essay / AI ask
+// ===========================
+function renderPracticeModeSelector(currentMode = 'quiz') {
+  const isQuiz = currentMode === 'quiz';
+  const isEssay = currentMode === 'essay';
+  const isAiAsk = currentMode === 'aiask';
+  return `
+    <div class="practice-mode-bar">
+      <select class="practice-mode-select" id="practice-mode-select" aria-label="選擇練習模式">
+        <option value="quiz" ${isQuiz ? 'selected' : ''}>📝 單字拼寫</option>
+        <option value="essay" ${isEssay ? 'selected' : ''}>✍️ 文章撰寫</option>
+        <option value="aiask" ${isAiAsk ? 'selected' : ''}>💬 AI 詢問</option>
+      </select>
+    </div>`;
+}
+
+function bindPracticeModeSelector(container, currentMode = 'quiz') {
+  const selector = container.querySelector('#practice-mode-select');
+  if (!selector) return;
+  selector.addEventListener('change', (e) => {
+    const mode = e.target.value;
+    if (mode === currentMode) return;
+    Router.essayActive = false;
+    Router.quizActive = false;
+    if (mode === 'essay') Views.essay.render(container);
+    else if (mode === 'aiask') Views.aiAsk.render(container);
+    else Views.practice.render(container);
+  });
+}
+
 // ===========================
 // PRACTICE VIEW
 // ===========================
@@ -1748,13 +1778,7 @@ Views.practice = {
     const totalWords = DB.getWords().length;
     container.innerHTML = `
       <div class="section-header"><h1 class="section-title">練習</h1></div>
-      <div class="practice-mode-bar">
-        <select class="practice-mode-select" id="practice-mode-select">
-          <option value="quiz">📝 單字拼寫</option>
-          <option value="essay">✍️ 文章撰寫</option>
-          <option value="aiask">💬 AI 詢問</option>
-        </select>
-      </div>
+      ${renderPracticeModeSelector('quiz')}
       <div class="practice-setup">
         ${totalWords === 0 ? `<div class="no-api-warning"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>資料庫尚無單字，請先新增單字</div>` : ''}
         <div class="option-group">
@@ -1790,12 +1814,7 @@ Views.practice = {
     container.querySelectorAll('[data-mode]').forEach(opt => opt.addEventListener('click', () => {
       container.querySelectorAll('[data-mode]').forEach(o=>o.classList.remove('selected')); opt.classList.add('selected'); state.selectedMode = opt.dataset.mode;
     }));
-    document.getElementById('practice-mode-select')?.addEventListener('change', (e) => {
-      const mode = e.target.value;
-      if (mode === 'essay') Views.essay.render(container);
-      else if (mode === 'aiask') Views.aiAsk.render(container);
-      // quiz = already here, no navigation needed
-    });
+    bindPracticeModeSelector(container, 'quiz');
     container.querySelectorAll('[data-tts-delay]').forEach(btn => {
       btn.addEventListener('click', () => {
         container.querySelectorAll('[data-tts-delay]').forEach(b => b.classList.remove('selected'));
@@ -2894,7 +2913,7 @@ Views.database = {
 };
 
 // ===========================
-// STATS VIEW — with export at bottom
+// STATS VIEW — statistics display; CSV export lives in Settings
 // ===========================
 
 // ===========================
@@ -2919,6 +2938,7 @@ Views.essay = {
         <button class="back-link" id="essay-back-btn">← 返回</button>
         <h1 class="section-title">文章撰寫</h1>
       </div>
+      ${renderPracticeModeSelector('essay')}
       ${!hasKey ? '<div class="no-api-warning">請先在設定頁填入 Gemini API Key</div>' : ''}
 
       <div class="essay-mode-toggle">
@@ -2948,6 +2968,8 @@ Views.essay = {
       <div id="essay-result-area" style="margin-top:16px"></div>
       <div style="height:20px"></div>
     `;
+
+    bindPracticeModeSelector(container, 'essay');
 
     // Mode toggle
     document.getElementById('essay-mode-vocab')?.addEventListener('click', () => {
@@ -3262,6 +3284,7 @@ Views.aiAsk = {
         <button class="back-link" id="aiask-back-btn">← 返回</button>
         <h1 class="section-title">AI 詢問</h1>
       </div>
+      ${renderPracticeModeSelector('aiask')}
 
       ${!hasKey ? '<div class="no-api-warning">請先在設定頁填入 Gemini API Key 才能使用 AI 詢問</div>' : ''}
 
@@ -3293,6 +3316,8 @@ Views.aiAsk = {
       <div id="aiask-history-list"></div>
       <div style="height:20px"></div>
     `;
+
+    bindPracticeModeSelector(container, 'aiask');
 
     document.getElementById('aiask-back-btn')?.addEventListener('click', () => {
       Router.essayActive = false;
@@ -3465,8 +3490,8 @@ Views.stats = {
         </div>
       </div>
 
-      <!-- ★ 匯出統計區塊 -->
-      <div class="stats-export-card">
+      <!-- ★ 統計摘要：CSV 匯出功能已移至設定頁 -->
+      <div class="stats-summary-card">
         <div class="stats-export-summary">
           <div class="stats-export-item"><div class="stats-export-num">${totalSessions}</div><div class="stats-export-label">練習次數</div></div>
           <div class="stats-export-sep"></div>
@@ -3474,10 +3499,7 @@ Views.stats = {
           <div class="stats-export-sep"></div>
           <div class="stats-export-item"><div class="stats-export-num" style="color:var(--primary)">${overallPct}%</div><div class="stats-export-label">整體正確率</div></div>
         </div>
-        <button class="btn-stats-export" id="export-stats-btn">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:18px;height:18px"><rect x="2" y="2" width="20" height="20" rx="2" fill="#5b8dd9" stroke="#3a6bc4" stroke-width="1.5"/><rect x="6" y="2" width="12" height="8" rx="1" fill="#a8c4f0" stroke="#3a6bc4" stroke-width="1.2"/><rect x="9" y="3.5" width="4" height="5" rx="0.5" fill="#3a6bc4"/><rect x="4" y="13" width="16" height="7" rx="1" fill="#d6e8ff" stroke="#3a6bc4" stroke-width="1.2"/></svg>
-          匯出統計資料 CSV
-        </button>
+        <div class="stats-export-note">CSV 匯出請至「設定 → 匯出統計資料」。</div>
       </div>
 
       <div style="height:20px"></div>
@@ -3496,15 +3518,6 @@ Views.stats = {
     }));
     this.updateChart(allHistory);
 
-    // Export stats
-    document.getElementById('export-stats-btn').addEventListener('click', () => {
-      if (!allHistory.length) { showToast('尚無統計資料'); return; }
-      const csv = DB.exportStatsCSV();
-      const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
-      const url = URL.createObjectURL(blob); const a = document.createElement('a');
-      a.href=url; a.download=`stats_${todayStr().replace(/\//g,'-')}.csv`; a.click(); URL.revokeObjectURL(url);
-      showToast('✓ 統計資料已匯出');
-    });
   },
   updateChart(allHistory) {
     const labels=[]; const now=new Date();
@@ -4092,7 +4105,7 @@ Views.settings = {
             <label class="model-dropdown-label">AI 模型</label>
             <select class="model-dropdown-select" id="gemini-model-select">
               ${Gemini.AVAILABLE_MODELS.map(m =>
-                `<option value="${m.id}" ${savedModel===m.id?'selected':''}>${m.label}${m.tag?' ★':''}</option>`
+                `<option value="${escapeHTML(m.id)}" ${savedModel===m.id?'selected':''}>${escapeHTML(m.label)}${m.tag ? '（' + escapeHTML(m.tag) + '）' : ''}</option>`
               ).join('')}
             </select>
           </div>
