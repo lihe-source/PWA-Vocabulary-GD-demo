@@ -215,6 +215,7 @@ html, body {
 .word-separator { width:10px; display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--text-muted); }
 
 /* FIX #6: Visual letter boxes (div, not input) */
+.letter-input-wrap { contain: layout paint; }
 .letter-box-vis {
   width: 38px; height: 44px;
   border: 2px solid var(--border);
@@ -229,6 +230,7 @@ html, body {
   color: #3a5048;
   text-transform: lowercase;
   /* No transition on default/filled — keeps typing snappy; transitions only on correct/wrong via specific classes */
+  contain: layout paint style;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -821,7 +823,7 @@ html, body {
   margin: 0 8px;
 }
 
-/* V5.7: stats page keeps summary only; CSV export lives in Settings. */
+/* V5.9: stats page keeps summary only; CSV export lives in Settings. */
 .stats-summary-card {
   margin: 12px 12px 0;
   background: var(--card-bg);
@@ -2153,7 +2155,7 @@ a.err-back-link {
 
 
 
-/* V5.7: iOS PWA horizontal overflow guard */
+/* V5.9: iOS PWA horizontal overflow guard */
 #view-container, .settings-card, .card, .home-menu-grid, .essay-fb-card, .aiask-answer-box, .sentence-log-scroll {
   max-width: 100%;
 }

@@ -1,11 +1,11 @@
 // ===========================
-// 英文單字複習 PWA - app.js V5_7
-// 更新：修正版本顯示、清除資料、Service Worker 相容性、CSV 匯入與 AI 輸出安全
+// 英文單字複習 PWA - app.js V6_0
+// 更新：練習模式輸入效能優化，降低單字拼寫 key in 卡頓與延遲
 // ===========================
 
-const APP_VERSION = 'V5_7';
-const APP_DISPLAY_VERSION = 'V5.7';
-const APP_CACHE_VERSION = 'Voc-PWA-V5_7';
+const APP_VERSION = 'V6_0';
+const APP_DISPLAY_VERSION = 'V6.0';
+const APP_CACHE_VERSION = 'Voc-PWA-V6_0';
 
 // Register Service Worker only when supported (prevents errors in unsupported browsers / webviews).
 if ('serviceWorker' in navigator) {
@@ -1853,9 +1853,10 @@ Views.practice = {
     if (!ghost) {
       ghost = document.createElement('input');
       ghost.id = 'quiz-ghost-input';
-      // type="search" suppresses iOS QuickType predictive text bar
-      ghost.type = 'search';
-      ghost.style.cssText = `position:fixed;bottom:calc(var(--nav-height)+20px);left:50%;transform:translateX(-50%);width:1px;height:1px;opacity:0.01;border:none;outline:none;background:transparent;color:transparent;font-size:16px;z-index:50;pointer-events:none;-webkit-appearance:none;`;
+      // Keep a real input focused for the iOS keyboard, but make it visually inert.
+      // type="text" avoids native search-field decoration work while typing.
+      ghost.type = 'text';
+      ghost.style.cssText = `position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;border:none;outline:none;background:transparent;color:transparent;caret-color:transparent;font-size:16px;z-index:-1;pointer-events:none;-webkit-appearance:none;appearance:none;`;
       ghost.setAttribute('autocapitalize','none');
       ghost.setAttribute('autocorrect','off');
       ghost.setAttribute('autocomplete','off');
@@ -1949,71 +1950,87 @@ Views.practice = {
       wrap.appendChild(group);
     });
     const ghost = this._ghost; ghost.value = '';
-    // Clean up previous handlers (only 'input' is used now)
+    // Clean up previous handlers. V6_0 uses beforeinput fast-path + input fallback.
     if (ghost._beforeInputH) { ghost.removeEventListener('beforeinput', ghost._beforeInputH); ghost._beforeInputH = null; }
     if (ghost._inputH)       { ghost.removeEventListener('input', ghost._inputH);             ghost._inputH = null;       }
     if (ghost._keydownH)     { ghost.removeEventListener('keydown', ghost._keydownH);          ghost._keydownH = null;     }
-    // correctStr contains only letters — matches what the user can type
-    let userInput = ''; const maxLen = totalLetters; const correctStr = word.english.replace(/[^a-zA-Z]/g,'').toLowerCase();
-    // Track previous box state to avoid unnecessary DOM writes
+
+    // correctStr contains only letters — matches what the user can type.
+    let userInput = '';
+    const maxLen = totalLetters;
+    const correctStr = word.english.replace(/[^a-zA-Z]/g,'').toLowerCase();
+
+    // Track previous box state to avoid unnecessary DOM writes.
     const prevCls = new Array(allBoxDivs.length).fill('');
     const prevTxt = new Array(allBoxDivs.length).fill('');
-    let prevCursorIdx = -1;
-    const updateVisual = (state = 'default') => {
-      allBoxDivs.forEach((box, i) => {
-        let cls, txt;
-        if (state === 'correct') {
-          cls = 'correct'; txt = correctStr[i] || '';
-        } else if (state === 'wrong') {
-          cls = 'wrong'; txt = userInput[i] || '';
-        } else {
-          if (i < userInput.length)       { cls = 'filled'; txt = userInput[i]; }
-          else if (i === userInput.length) { cls = 'cursor'; txt = ''; }
-          else                             { cls = '';        txt = ''; }
-        }
-        // Only write textContent if changed
-        if (prevTxt[i] !== txt) { box.textContent = txt; prevTxt[i] = txt; }
-        // Only write className if changed
-        if (prevCls[i] !== cls) {
-          // Use base class + modifier via dataset to avoid full className string rebuild
-          box.className = cls ? 'letter-box-vis ' + cls : 'letter-box-vis';
-          prevCls[i] = cls;
-        }
-      });
-      // Cursor-active: single-pass update merged with main loop
-      const newCursor = (state === 'default' && userInput.length < allBoxDivs.length) ? userInput.length : -1;
-      if (newCursor !== prevCursorIdx) {
-        if (prevCursorIdx >= 0 && prevCursorIdx < allBoxDivs.length)
-          allBoxDivs[prevCursorIdx].classList.remove('cursor-active');
-        if (newCursor >= 0) allBoxDivs[newCursor].classList.add('cursor-active');
-        prevCursorIdx = newCursor;
-      }
-    };
-    // ── Input handling ──────────────────────────────────────────────────────────
-    //
-    // ROOT CAUSE OF PREVIOUS BUG:
-    //   iOS with Chinese keyboard in English mode fires beforeinput TWICE per key:
-    //     1) inputType="insertCompositionText"  (intermediate)
-    //     2) inputType="insertFromComposition"  (final committed char)
-    //   The old beforeinput handler processed BOTH, double-counting every letter.
-    //   e.g. typing "cat" produced userInput="cca" → wrong answer every time.
-    //
-    // FIX: Remove beforeinput entirely. Let the browser write to ghost naturally.
-    //   Read result via 'input' event only — one event per committed character,
-    //   works correctly on iOS (all keyboards), Android IME, desktop, and paste.
-    //   No ghost.value writes from JS (avoids the layout-pass lag).
+    let lastRenderedInput = null;
+    let evaluating = false;
 
-    ghost._inputH = () => {
-      if (this.state.showAnswer) return;
-      // Read what the browser committed — filter letters, cap at maxLen
-      const raw = ghost.value.replace(/[^a-zA-Z]/g, '').toLowerCase().slice(0, maxLen);
-      if (raw === userInput) return;  // no change (spurious event)
-      userInput = raw;
-      updateVisual();
-      if (userInput.length < maxLen) return;
-      // All boxes filled — evaluate answer
+    const writeBox = (i, cls, txt) => {
+      if (i < 0 || i >= allBoxDivs.length) return;
+      const box = allBoxDivs[i];
+      if (prevTxt[i] !== txt) { box.textContent = txt; prevTxt[i] = txt; }
+      if (prevCls[i] !== cls) { box.className = cls ? 'letter-box-vis ' + cls : 'letter-box-vis'; prevCls[i] = cls; }
+    };
+
+    const updateDefaultVisual = () => {
+      const previous = lastRenderedInput;
+      const next = userInput;
+
+      // First render: paint all boxes once.
+      if (previous === null) {
+        for (let i = 0; i < allBoxDivs.length; i++) {
+          if (i < next.length) writeBox(i, 'filled', next[i]);
+          else if (i === next.length) writeBox(i, 'cursor cursor-active', '');
+          else writeBox(i, '', '');
+        }
+        lastRenderedInput = next;
+        return;
+      }
+
+      // Incremental render: only update changed letters plus old/new cursor positions.
+      let firstChanged = 0;
+      const minLen = Math.min(previous.length, next.length);
+      while (firstChanged < minLen && previous[firstChanged] === next[firstChanged]) firstChanged++;
+
+      const indices = new Set();
+      const oldCursor = previous.length < allBoxDivs.length ? previous.length : -1;
+      const newCursor = next.length < allBoxDivs.length ? next.length : -1;
+      if (oldCursor >= 0) indices.add(oldCursor);
+      if (newCursor >= 0) indices.add(newCursor);
+      for (let i = firstChanged; i <= Math.max(previous.length, next.length); i++) indices.add(i);
+
+      indices.forEach(i => {
+        if (i < 0 || i >= allBoxDivs.length) return;
+        if (i < next.length) writeBox(i, 'filled', next[i]);
+        else if (i === next.length) writeBox(i, 'cursor cursor-active', '');
+        else writeBox(i, '', '');
+      });
+      lastRenderedInput = next;
+    };
+
+    const updateVisual = (state = 'default') => {
+      if (state === 'correct') {
+        for (let i = 0; i < allBoxDivs.length; i++) writeBox(i, 'correct', correctStr[i] || '');
+        lastRenderedInput = userInput;
+        return;
+      }
+      if (state === 'wrong') {
+        for (let i = 0; i < allBoxDivs.length; i++) writeBox(i, 'wrong', userInput[i] || '');
+        lastRenderedInput = userInput;
+        return;
+      }
+      updateDefaultVisual();
+    };
+
+    const normalizeInput = (value) => (value || '').replace(/[^a-zA-Z]/g, '').toLowerCase().slice(0, maxLen);
+
+    const maybeEvaluate = () => {
+      if (userInput.length < maxLen || evaluating) return;
+      evaluating = true;
       const snapshot = userInput;
       requestAnimationFrame(() => {
+        evaluating = false;
         if (this.state.showAnswer) return;
         if (!this.state.waitingRetype)
           this._checkAnswer(word, snapshot, allBoxDivs, container, updateVisual, correctStr, maxLen);
@@ -2022,22 +2039,89 @@ Views.practice = {
       });
     };
 
-    // _beforeInputH kept as no-op for cleanup API consistency (removed below)
-    ghost._beforeInputH = null;
+    const applyInput = (nextValue, syncGhost = true) => {
+      if (this.state.showAnswer) return;
+      const next = normalizeInput(nextValue);
+      if (next === userInput) {
+        if (syncGhost && ghost.value !== userInput) ghost.value = userInput;
+        return;
+      }
+      userInput = next;
+      if (syncGhost && ghost.value !== userInput) ghost.value = userInput;
+      updateVisual();
+      maybeEvaluate();
+    };
 
-    // keydown: only needed for _enterNextH (added in showNextBtn); backspace is
-    // handled naturally by the browser writing to ghost then firing 'input'.
-    ghost._keydownH = null;
+    // ── Input handling ──────────────────────────────────────────────────────────
+    // V6_0: beforeinput is used as a fast path, so the app updates the letter boxes
+    // before Safari finishes its native input rendering pipeline. To avoid the old
+    // iOS Chinese-keyboard double-letter bug, intermediate insertCompositionText is
+    // ignored and only committed text / deletion is processed. The input event stays
+    // as a fallback for browsers or IME paths that do not allow beforeinput canceling.
+    ghost._beforeInputH = (e) => {
+      if (this.state.showAnswer) return;
+      const type = e.inputType || '';
 
+      // Ignore intermediate IME composition. The committed value arrives later as
+      // insertFromComposition or via the normal input fallback.
+      if (e.isComposing || type === 'insertCompositionText') return;
+
+      if (type === 'deleteContentBackward') {
+        e.preventDefault();
+        applyInput(userInput.slice(0, -1));
+        return;
+      }
+
+      if (type === 'deleteContentForward' || type === 'deleteByCut') {
+        e.preventDefault();
+        return;
+      }
+
+      if (type === 'insertFromPaste') {
+        e.preventDefault();
+        const pasted = e.data || e.clipboardData?.getData?.('text') || e.dataTransfer?.getData?.('text') || '';
+        applyInput(userInput + pasted);
+        return;
+      }
+
+      if (type === 'insertText' || type === 'insertFromComposition' || type === '') {
+        const letters = normalizeInput(e.data || '');
+        if (!letters || userInput.length >= maxLen) {
+          e.preventDefault();
+          if (ghost.value !== userInput) ghost.value = userInput;
+          return;
+        }
+        e.preventDefault();
+        applyInput(userInput + letters);
+      }
+    };
+
+    ghost._inputH = () => {
+      // Fallback path: browser/IME updated the hidden input itself.
+      applyInput(ghost.value, false);
+    };
+
+    // Hardware-keyboard fallback for environments where beforeinput is incomplete.
+    // Guard against double handling: normal mobile input is already covered above.
+    ghost._keydownH = (e) => {
+      if (this.state.showAnswer) return;
+      if (e.key === 'Backspace' && !e.isComposing && e.inputType === undefined && typeof InputEvent === 'undefined') {
+        e.preventDefault();
+        applyInput(userInput.slice(0, -1));
+      }
+    };
+
+    ghost.addEventListener('beforeinput', ghost._beforeInputH, { passive: false });
     ghost.addEventListener('input', ghost._inputH);
+    ghost.addEventListener('keydown', ghost._keydownH);
     ghost.style.pointerEvents = 'auto';
     wrap.style.cursor = 'text';
-    // Use .onclick assignment (not addEventListener) so it never accumulates across buildLetterBoxes calls
-    wrap.onclick = (e) => { e.stopPropagation(); ghost.focus(); };
+    // Use .onclick assignment (not addEventListener) so it never accumulates across buildLetterBoxes calls.
+    wrap.onclick = (e) => { e.stopPropagation(); ghost.focus({ preventScroll: true }); };
     const _qa = document.querySelector('.quiz-area');
-    if (_qa) { _qa.onclick = () => { if (this._ghost) this._ghost.focus(); }; }
+    if (_qa) { _qa.onclick = () => { if (this._ghost) this._ghost.focus({ preventScroll: true }); }; }
     Sound.unlock(); // ensure AudioContext is running before first keystroke
-    ghost.focus(); updateVisual();
+    ghost.focus({ preventScroll: true }); updateVisual();
   },
   // Canonical answer normaliser — strips everything except a-z, lowercases
   _norm(s) { return (s || '').replace(/[^a-zA-Z]/g, '').toLowerCase(); },
