@@ -13,3 +13,7 @@
 - APP_VERSION: V6_2
 - APP_DISPLAY_VERSION: V6.2
 - Service Worker cache: Voc-PWA-V6_2
+
+## 2026-06-20 修正
+- 修正 `index.html` 網頁標題仍顯示 V6.1 的問題，已改為 V6.2。
+- 為 `manifest.json`、`style.css`、`app.js` 加上 `?v=V6_2` 版本參數，降低瀏覽器或 GitHub Pages 快取到舊資源的機率。
